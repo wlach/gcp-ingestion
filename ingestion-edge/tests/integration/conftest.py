@@ -24,11 +24,25 @@ def pytest_addoption(parser: _pytest.config.argparsing.Parser):
         "--server", dest="server", default=None, help="Server to run tests against"
     )
     parser.addoption(
+        "--uses-11mb-queue",
+        action="store_true",
+        dest="uses_11mb_queue",
+        default=False,
+        help="Indicate --server has an 11MB volume for queue storage",
+    )
+    parser.addoption(
         "--uses-cluster",
         action="store_true",
         dest="uses_cluster",
         default=False,
         help="Indicate --server has more than one process",
+    )
+    parser.addoption(
+        "--uses-nginx",
+        action="store_true",
+        dest="uses_nginx",
+        default=False,
+        help="Indicate --server is behind nginx",
     )
     parser.addoption(
         "--no-verify",
@@ -114,5 +128,15 @@ def requests_session(request: _pytest.fixtures.SubRequest) -> requests.Session:
 
 
 @pytest.fixture
+def uses_11mb_queue(request: _pytest.fixtures.SubRequest) -> bool:
+    return request.config.getoption("uses_11mb_queue")
+
+
+@pytest.fixture
 def uses_cluster(request: _pytest.fixtures.SubRequest) -> bool:
     return request.config.getoption("uses_cluster")
+
+
+@pytest.fixture
+def uses_nginx(request: _pytest.fixtures.SubRequest) -> bool:
+    return request.config.getoption("uses_nginx")

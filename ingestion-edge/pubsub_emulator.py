@@ -80,7 +80,7 @@ class PubsubEmulator(
 
     def CreateTopic(
         self, request: pubsub_pb2.Topic, context: grpc.ServicerContext
-    ):  # noqa: D403
+    ) -> pubsub_pb2.Topic:  # noqa: D403
         """CreateTopic implementation."""
         self.logger.debug("CreateTopic(%s)", LazyFormat(request))
         if request.name in self.topics:
@@ -90,7 +90,7 @@ class PubsubEmulator(
 
     def DeleteTopic(
         self, request: pubsub_pb2.DeleteTopicRequest, context: grpc.ServicerContext
-    ):  # noqa: D403
+    ) -> empty_pb2.Empty:  # noqa: D403
         """DeleteTopic implementation."""
         self.logger.debug("DeleteTopic(%s)", LazyFormat(request))
         try:
@@ -101,7 +101,7 @@ class PubsubEmulator(
 
     def CreateSubscription(
         self, request: pubsub_pb2.Subscription, context: grpc.ServicerContext
-    ):  # noqa: D403
+    ) -> pubsub_pb2.Subscription:  # noqa: D403
         """CreateSubscription implementation."""
         self.logger.debug("CreateSubscription(%s)", LazyFormat(request))
         if request.name in self.subscriptions:
@@ -117,7 +117,7 @@ class PubsubEmulator(
         self,
         request: pubsub_pb2.DeleteSubscriptionRequest,
         context: grpc.ServicerContext,
-    ):  # noqa: D403
+    ) -> empty_pb2.Empty:  # noqa: D403
         """DeleteSubscription implementation."""
         self.logger.debug("DeleteSubscription(%s)", LazyFormat(request))
         try:
@@ -130,14 +130,13 @@ class PubsubEmulator(
 
     def Publish(
         self, request: pubsub_pb2.PublishRequest, context: grpc.ServicerContext
-    ):
+    ) -> pubsub_pb2.PublishResponse:
         """Publish implementation."""
         self.logger.debug("Publish(%.100s)", LazyFormat(request))
         if request.topic in self.status_codes:
             context.abort(self.status_codes[request.topic], "Override")
         if self.sleep is not None:
             time.sleep(self.sleep)
-        message_ids: List[str] = []
         try:
             subscriptions = self.topics[request.topic]
         except KeyError:
@@ -149,10 +148,11 @@ class PubsubEmulator(
             subscription.published.extend(request.messages)
         return pubsub_pb2.PublishResponse(message_ids=message_ids)
 
-    def Pull(self, request: pubsub_pb2.PullRequest, context: grpc.ServicerContext):
+    def Pull(
+        self, request: pubsub_pb2.PullRequest, context: grpc.ServicerContext
+    ) -> pubsub_pb2.PullResponse:
         """Pull implementation."""
         self.logger.debug("Pull(%.100s)", LazyFormat(request))
-        received_messages: List[pubsub_pb2.ReceivedMessage] = []
         try:
             subscription = self.subscriptions[request.subscription]
         except KeyError:
@@ -174,7 +174,7 @@ class PubsubEmulator(
 
     def Acknowledge(
         self, request: pubsub_pb2.AcknowledgeRequest, context: grpc.ServicerContext
-    ):
+    ) -> empty_pb2.Empty:
         """Acknowledge implementation."""
         self.logger.debug("Acknowledge(%s)", LazyFormat(request))
         try:
@@ -211,7 +211,7 @@ class PubsubEmulator(
 
     def UpdateTopic(
         self, request: pubsub_pb2.UpdateTopicRequest, context: grpc.ServicerContext
-    ):
+    ) -> pubsub_pb2.Topic:
         """Repurpose UpdateTopic API for setting up test conditions.
 
         :param request.topic.name: Name of the topic that needs overrides.

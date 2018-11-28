@@ -2,7 +2,7 @@ version: '3'
 
 # configure ingestion-edge for ci
 services:
-  web:
+  test:
     build: .
     image: &image "${DOCKERHUB_REPO-ingestion-edge}:${CIRCLE_TAG-latest}"
     environment:
@@ -33,13 +33,6 @@ services:
           "projects/test/topics/ingestion"
         ]
       ]
-  pubsub:
-    image: *image
-    command: python -m pubsub_emulator
-    environment:
-      PORT: 8085
-  test:
-    image: *image
     entrypoint: pytest
     command:
     - --black
@@ -48,9 +41,3 @@ services:
     - --mypy
     - --mypy-ignore-missing-imports
     - --cov=./ingestion_edge/
-    depends_on:
-    - pubsub
-    - web
-    environment:
-    - *emulator_host
-    - *route_table

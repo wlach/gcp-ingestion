@@ -2,8 +2,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, you can obtain one at http://mozilla.org/MPL/2.0/.
 
-import grpc
+from google.cloud.pubsub import PublisherClient, SubscriberClient
 import google.api_core.exceptions
+import grpc
 import pytest
 
 
@@ -13,7 +14,7 @@ def skipif(pubsub):
         pytest.skip("requires pubsub emulator")
 
 
-def test_emulator(publisher, subscriber):
+def test_emulator(publisher: PublisherClient, subscriber: SubscriberClient):
     publisher.create_topic("topic")
     subscriber.create_subscription("subscription", "topic")
     messages = [
