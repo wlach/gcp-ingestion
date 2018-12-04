@@ -1,0 +1,18 @@
+runtime: python27
+api_version: 1
+threadsafe: yes
+
+handlers:
+- url: /
+  script: forwarder.app
+
+libraries:
+- name: flask
+  version: latest
+- name: ujson
+  version: latest
+- name: protobuf
+  version: latest
+
+env_variables:
+  EDGE_TARGET: stage.ingestion.nonprod.dataops.mozgcp.net
