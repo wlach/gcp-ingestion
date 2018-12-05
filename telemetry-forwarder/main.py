@@ -52,7 +52,12 @@ async def publish(request):
     for i in range(3):
         try:
             await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
-        except (aiohttp.ClientResponseError, aiohttp.ClientConnectionError):
+        except aiohttp.ClientResponseError as e:
+            if e.code >= 500:
+                continue
+            else:
+                break
+        except aiohttp.ClientConnectionError:
             continue
         else:
             break
