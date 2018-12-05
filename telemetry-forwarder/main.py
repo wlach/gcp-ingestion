@@ -3,8 +3,11 @@ from heka.message_pb2 import Header, Message
 from os import environ
 from sanic import Sanic, response
 import aiohttp
+import logging
 import struct
+import sys
 import traceback
+import ujson as json
 
 app = Sanic(__name__)
 EDGE_TARGET = environ["EDGE_TARGET"]
@@ -14,7 +17,9 @@ CLIENT_SESSION = None
 @app.listener("before_server_start")
 async def add_loop(app, loop):
     global CLIENT_SESSION
-    CLIENT_SESSION = aiohttp.ClientSession(loop=loop, timeout=aiohttp.ClientTimeout(total=2))
+    CLIENT_SESSION = aiohttp.ClientSession(
+        loop=loop, timeout=aiohttp.ClientTimeout(total=4.5)
+    )
 
 
 @app.route("/", methods=["POST"])
@@ -49,7 +54,7 @@ async def publish(request):
     }
     uri = fields.pop("uri", "/submit")
     content = fields.pop("content", None)
-    for i in range(3):
+    for i in range(2):
         try:
             await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
         except aiohttp.ClientResponseError as e:
@@ -66,8 +71,33 @@ async def publish(request):
 
 @app.exception(Exception)
 def server_error(request, exception):
+    logging.error(traceback.format_exc())
     return response.text(traceback.format_exc(), 500)
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=environ['PORT'])
+class JsonFormatter(logging.Formatter):
+    def format(self, record = None):
+        return json.dumps(
+            {
+                key: value
+                for key, value in ({} if record is None else record.__dict__).items()
+                if key
+                not in (
+                    "pathname",
+                    "process",
+                    "processName",
+                    "thread",
+                    "threadName",
+                )
+                and value
+            }
+        ).replace("\\/", "/")
+
+
+handler = logging.StreamHandler(stream=sys.stdout)
+handler.set_name("console")
+handler.setFormatter(JsonFormatter())
+logging.root.addHandler(handler)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=environ["PORT"])
