@@ -1,3 +1,4 @@
 runtime: python37
+entrypoint: python main.py
 env_variables:
   EDGE_TARGET: https://stage.ingestion.nonprod.dataops.mozgcp.net

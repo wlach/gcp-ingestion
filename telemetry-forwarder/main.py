@@ -1,19 +1,25 @@
 from base64 import b64decode
-from flask import Flask, request
 from heka.message_pb2 import Header, Message
 from os import environ
-import logging
-import requests
+from sanic import Sanic, response
+import aiohttp
 import struct
 import traceback
 
-app = Flask(__name__)
+app = Sanic(__name__)
 EDGE_TARGET = environ["EDGE_TARGET"]
+CLIENT_SESSION = None
+
+
+@app.listener("before_server_start")
+async def add_loop(app, loop):
+    global CLIENT_SESSION
+    CLIENT_SESSION = aiohttp.ClientSession(loop=loop, timeout=aiohttp.ClientTimeout(total=8))
 
 
 @app.route("/", methods=["POST"])
-def publish():
-    data = request.get_json(force=True, silent=True)["message"]["data"]
+async def publish(request):
+    data = request.json["message"]["data"]
     raw = b64decode(data)
     msg = Message()
     if raw[:1] == b"\x1e":
@@ -43,12 +49,14 @@ def publish():
     }
     uri = fields.pop("uri", "/submit")
     content = fields.pop("content", None)
-    requests.post(EDGE_TARGET + uri, data=content, headers=fields)
-    return "", 200
+    await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
+    return response.text("")
 
 
-@app.errorhandler(500)
-def server_error(e):
-    logging.exception("Uncaught Exception")
-    # TODO remove traceback from response body
-    return traceback.format_exc(), 500
+@app.exception(Exception)
+def server_error(request, exception):
+    return response.text(traceback.format_exc(), 500)
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=environ['PORT'])

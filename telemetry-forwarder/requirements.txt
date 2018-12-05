@@ -1,4 +1,4 @@
-Flask==1.0.2
+Sanic==0.8.3
+aiohttp==3.4.4
 protobuf==3.6.1
-requests==2.20.1
 ujson==1.35
