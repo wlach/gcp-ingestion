@@ -52,7 +52,7 @@ async def publish(request):
     for i in range(3):
         try:
             await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
-        except aiohttp.ClientError:
+        except (aiohttp.ClientResponseError, aiohttp.ClientConnectionError):
             continue
         else:
             break
