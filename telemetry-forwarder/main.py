@@ -54,6 +54,9 @@ async def publish(request):
     }
     uri = fields.pop("uri", "/submit")
     content = fields.pop("content", None)
+    for value in fields.values():
+        if type(value) is bytes:
+            return response.text("") # reject non-utf-8 header
     for i in range(2):
         try:
             await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
