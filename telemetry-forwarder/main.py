@@ -54,8 +54,9 @@ async def publish(request):
     }
     uri = fields.pop("uri", "/submit")
     content = fields.pop("content", None)
-    for value in fields.values():
+    for key, value in fields.items():
         if type(value) is bytes:
+            logging.warning("invalid %s value %s" % (key, value.__repr__))
             return response.text("") # reject non-utf-8 header
     for i in range(2):
         try:
