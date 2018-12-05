@@ -14,7 +14,7 @@ CLIENT_SESSION = None
 @app.listener("before_server_start")
 async def add_loop(app, loop):
     global CLIENT_SESSION
-    CLIENT_SESSION = aiohttp.ClientSession(loop=loop, timeout=aiohttp.ClientTimeout(total=8))
+    CLIENT_SESSION = aiohttp.ClientSession(loop=loop, timeout=aiohttp.ClientTimeout(total=2))
 
 
 @app.route("/", methods=["POST"])
@@ -49,7 +49,13 @@ async def publish(request):
     }
     uri = fields.pop("uri", "/submit")
     content = fields.pop("content", None)
-    await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
+    for i in range(3):
+        try:
+            await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
+        except aiohttp.ClientError:
+            continue
+        else:
+            break
     return response.text("")
 
 
