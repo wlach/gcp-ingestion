@@ -2,6 +2,7 @@ from base64 import b64decode
 from heka.message_pb2 import Header, Message
 from os import environ
 from sanic import Sanic, response
+import asyncio
 import aiohttp
 import logging
 import struct
@@ -18,7 +19,7 @@ CLIENT_SESSION = None
 async def add_loop(app, loop):
     global CLIENT_SESSION
     CLIENT_SESSION = aiohttp.ClientSession(
-        loop=loop, timeout=aiohttp.ClientTimeout(total=4.5)
+        loop=loop, timeout=aiohttp.ClientTimeout(total=9)
     )
 
 
@@ -58,19 +59,13 @@ async def publish(request):
         if type(value) is bytes:
             logging.warning("invalid %s value %s" % (key, value.__repr__()))
             return response.text("") # reject non-utf-8 header
-    for i in range(2):
-        try:
-            await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
-        except aiohttp.ClientResponseError as e:
-            if e.code >= 500:
-                continue
-            else:
-                break
-        except aiohttp.ClientConnectionError:
-            continue
-        else:
-            break
-    return response.text("")
+    try:
+        await CLIENT_SESSION.post(EDGE_TARGET + uri, data=content, headers=fields)
+    except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+        logging.error("Gateway Timeout")
+        return response.text("Gateway Timeout", 504)
+    else:
+        return response.text("")
 
 
 @app.exception(Exception)
