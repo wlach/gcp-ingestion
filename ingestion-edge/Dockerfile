@@ -2,6 +2,8 @@ FROM python:3.7
 WORKDIR /app
 COPY constraints.txt requirements.txt /app/
 RUN pip install --upgrade --no-cache-dir -r requirements.txt
+# remove after release of https://github.com/peter-wangxu/persist-queue/pull/73
+RUN pip install --no-index --upgrade git+git://github.com/peter-wangxu/persist-queue@d5c93ae1#egg=persist-queue
 # remove after merge and release of https://github.com/mozilla-services/python-dockerflow/pull/27
 RUN pip install --no-index git+git://github.com/relud/python-dockerflow@master#egg=dockerflow[sanic]
 COPY . /app
