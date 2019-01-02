@@ -31,7 +31,10 @@ dictConfig(
                 "formatter": "json",
             }
         },
-        "loggers": {"request.summary": {"handlers": ["console"], "level": "DEBUG"}},
+        "loggers": {
+            "request.summary": {"handlers": ["console"], "level": "DEBUG"},
+            "ingestion-edge": {"handlers": ["console"], "level": "DEBUG"},
+        },
     }
 )
 
@@ -71,6 +74,12 @@ METADATA_HEADERS = {
     for header in (raw.strip().lower(),)
     if header
 }
+
+PUBLISH_TIMEOUT_SECONDS = float(environ.get("PUBLISH_TIMEOUT_SECONDS", 1))
+
+FLUSH_PUBLISH_TIMEOUT_SECONDS = float(
+    environ.get("FLUSH_PUBLISH_TIMEOUT_SECONDS", PUBLISH_TIMEOUT_SECONDS)
+)
 
 FLUSH_CONCURRENT_BYTES = int(environ.get("FLUSH_CONCURRENT_BYTES", 1e7))
 

@@ -28,14 +28,33 @@ class PubsubEmulator(
 ):
     """Pubsub gRPC emulator for testing."""
 
-    def __init__(self, server: grpc.Server):
+    def __init__(
+        self,
+        max_workers: int = int(os.environ.get("MAX_WORKERS", 1)),
+        port: int = int(os.environ.get("PORT", 0)),
+    ):
         """Initialize a new PubsubEmulator and add it to a gRPC server."""
         self.topics: Dict[str, Set[Subscription]] = {}
         self.subscriptions: Dict[str, Subscription] = {}
         self.status_codes: Dict[str, grpc.StatusCode] = {}
         self.sleep = None
-        pubsub_pb2_grpc.add_PublisherServicer_to_server(self, server)
-        pubsub_pb2_grpc.add_SubscriberServicer_to_server(self, server)
+        self.port = port
+        self.max_workers = max_workers
+        self.create_server()
+
+    def create_server(self):
+        """Create and start a new grpc.Server configured with PubsubEmulator."""
+        self.server = grpc.server(
+            concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers),
+            options=[
+                ("grpc.max_receive_message_length", -1),
+                ("grpc.max_send_message_length", -1),
+            ],
+        )
+        self.port = self.server.add_insecure_port("0.0.0.0:%d" % self.port)
+        pubsub_pb2_grpc.add_PublisherServicer_to_server(self, self.server)
+        pubsub_pb2_grpc.add_SubscriberServicer_to_server(self, self.server)
+        self.server.start()
 
     def CreateTopic(self, request, context):  # noqa: D403
         """CreateTopic implementation."""
@@ -133,6 +152,26 @@ class PubsubEmulator(
                     context.set_code(grpc.StatusCode.NOT_FOUND)
         return empty_pb2.Empty()
 
+    def ModifyAckDeadline(
+        self,
+        request: pubsub_pb2.ModifyAckDeadlineRequest,
+        context: grpc.ServicerContext,
+    ) -> empty_pb2.Empty:  # noqa: D403
+        """ModifyAckDeadline implementation."""
+        try:
+            subscription = self.subscriptions[request.subscription]
+        except KeyError:
+            context.abort(grpc.StatusCode.NOT_FOUND, "Subscription not found")
+        # deadline is not tracked so only handle expiration when set to 0
+        if request.ack_deadline_seconds == 0:
+            for ack_id in request.ack_ids:
+                try:
+                    # move message from pulled back to published
+                    subscription.published.append(subscription.pulled.pop(ack_id))
+                except KeyError:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "Ack ID not found")
+        return empty_pb2.Empty()
+
     def UpdateTopic(self, request, context):
         """Repurpose UpdateTopic API for setting up test conditions.
 
@@ -158,7 +197,7 @@ class PubsubEmulator(
                 if key.lower() in ("status_code", "statuscode"):
                     if value:
                         self.status_codes[request.topic.name] = getattr(
-                            grpc.StatusCode, value
+                            grpc.StatusCode, value.upper()
                         )
                     else:
                         del self.status_codes[request.topic.name]
@@ -174,27 +213,9 @@ class PubsubEmulator(
         return request.topic
 
 
-def create_server(
-    max_workers=int(os.environ.get("MAX_WORKERS", 1)),
-    port=int(os.environ.get("PORT", 0)),
-):
-    """Create and start a new grpc.Server configured with PubsubEmulator."""
-    server = grpc.server(
-        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
-        options=[
-            ("grpc.max_receive_message_length", 10 * 1000 * 1000),
-            ("grpc.max_send_message_length", 10 * 1000 * 1000),
-        ],
-    )
-    port = server.add_insecure_port("0.0.0.0:%d" % port)
-    emulator = PubsubEmulator(server)
-    server.start()
-    return server, port, emulator
-
-
 def main():
     """Run PubsubEmulator gRPC server."""
-    server = create_server()[0]
+    server = PubsubEmulator().server
     try:
         while True:
             time.sleep(60)
