@@ -2,8 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, you can obtain one at http://mozilla.org/MPL/2.0/.
 
+from ..helpers import handle_request
 from ingestion_edge.dockerflow import init_app
-from sanic.request import Request
 import pytest
 import json
 
@@ -16,11 +16,7 @@ def init(app, mocker):
 
 
 async def test_heartbeat(app):
-    responses = []
-    request = Request(b"/__heartbeat__", {}, "1.1", "GET", "http")
-    await app.handle_request(request, lambda r: responses.append(r), None)
-    assert len(responses) == 1
-    response = responses.pop()
+    response = await handle_request(app, b"/__heartbeat__")
     assert response.status == 200
     assert json.loads(response.body.decode()) == {
         "status": "ok",
@@ -30,21 +26,13 @@ async def test_heartbeat(app):
 
 
 async def test_lbheartbeat(app):
-    responses = []
-    request = Request(b"/__lbheartbeat__", {}, "1.1", "GET", "http")
-    await app.handle_request(request, lambda r: responses.append(r), None)
-    assert len(responses) == 1
-    response = responses.pop()
+    response = await handle_request(app, b"/__lbheartbeat__")
     assert response.status == 200
     assert response.body == b""
 
 
 async def test_version(app):
-    responses = []
-    request = Request(b"/__version__", {}, "1.1", "GET", "http")
-    await app.handle_request(request, lambda r: responses.append(r), None)
-    assert len(responses) == 1
-    response = responses.pop()
+    response = await handle_request(app, b"/__version__")
     assert response.status == 200
     assert set(json.loads(response.body.decode()).keys()) == {
         "build",

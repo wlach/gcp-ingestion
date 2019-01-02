@@ -2,10 +2,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, you can obtain one at http://mozilla.org/MPL/2.0/.
 
+from ..helpers import handle_request
 from ingestion_edge import publish
 from ingestion_edge.config import Route
 from sanic import Sanic
-from sanic.request import Request
 import pytest
 
 ROUTE_TABLE = [
@@ -49,24 +49,13 @@ def app():
 async def test_endpoint(app, kwargs, method, mocker, uri_bytes):
     mocker.patch("ingestion_edge.publish.SQLiteAckQueue", dict)
     mocker.patch("ingestion_edge.publish.PublisherClient", lambda: None)
-    mocker.patch("ingestion_edge.publish.submit", lambda req, **kw: (req, kw))
+    mocker.patch("ingestion_edge.publish.submit", lambda _, **kw: kw)
     app.config["ROUTE_TABLE"] = ROUTE_TABLE
     publish.init_app(app)
-    responses = []
-    request = Request(uri_bytes, {}, "1.1", method, None)
-    await app.handle_request(request, lambda r: responses.append(r), None)
-    assert responses == [
-        (
-            request,
-            dict(
-                client=None,
-                timeout=None,
-                q={"path": ":memory:"},
-                metadata_headers={},
-                **kwargs
-            ),
-        )
-    ]
+    response = await handle_request(app, uri_bytes, method)
+    assert response == dict(
+        client=None, timeout=None, q={"path": ":memory:"}, metadata_headers={}, **kwargs
+    )
 
 
 def test_missing_queue_path(app):
