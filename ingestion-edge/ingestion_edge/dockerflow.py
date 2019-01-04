@@ -12,6 +12,7 @@ from dockerflow.sanic import Dockerflow
 from functools import partial
 from persistqueue.sqlackqueue import SQLiteAckQueue
 from sanic import Sanic
+import logging
 import os
 
 LOW_DISK_ERROR_ID = "edge.checks.E001"
@@ -45,18 +46,26 @@ def check_queue_size(q: SQLiteAckQueue):
     try:
         if q is not None:
             if q.size > 0:
+                logging.getLogger("ingestion-edge").info(
+                    "q.size == %d" % q.size, extra={"size": q.size}
+                )
                 return [
                     checks.Info(
                         "queue contains pending messages", id=QUEUE_PENDING_INFO_ID
                     )
                 ]
             elif q.unack_count() > 0:
+                logging.getLogger("ingestion-edge").info(
+                    "q.unack_count() == %d" % q.unack_count(),
+                    extra={"size": q.unack_count()},
+                )
                 return [
                     checks.Info(
                         "queue contains unacked messages", id=QUEUE_UNACKED_INFO_ID
                     )
                 ]
-    except Exception:
+    except Exception as e:
+        logging.getLogger("ingestion-edge").error(e)
         return [checks.Error("queue raised exception on access", id=QUEUE_ERROR_ID)]
     else:
         return []

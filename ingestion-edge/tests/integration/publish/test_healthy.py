@@ -122,7 +122,7 @@ def test_submit_invalid_content_length(integration_test: IntegrationTest):
 
 @pytest.mark.skip("not implemented")
 def test_submit_invalid_host(integration_test: IntegrationTest):
-    integration_test.headers = {"host": HEADER[b"TOO_LONG"]}  # does not work
+    integration_test.headers = {"host": HEADER["TOO_LONG"]}  # does not work
     integration_test.assert_rejected(status=400)
     integration_test.assert_not_delivered()
 
@@ -132,7 +132,7 @@ def test_submit_invalid_payload_too_large(
 ):
     if not uses_nginx:
         pytest.skip("requires nginx")
-    integration_test.data = DATA[b"TOO_LONG"]
+    integration_test.data = DATA["TOO_LONG"]
     integration_test.assert_rejected(status=413)
     integration_test.assert_not_delivered()
 
@@ -143,6 +143,6 @@ def test_submit_invalid_headers_exceed_buffer(
     if not uses_nginx:
         pytest.skip("requires nginx")
     # overflow 8KB buffer
-    integration_test.headers = {str(i): HEADER[b"MAX_LENGTH"] for i in range(8)}
+    integration_test.headers = {str(i): HEADER["MAX_LENGTH"] for i in range(8)}
     integration_test.assert_rejected(status=414)
     integration_test.assert_not_delivered()

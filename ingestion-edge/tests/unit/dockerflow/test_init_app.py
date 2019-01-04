@@ -4,7 +4,6 @@
 
 from ..helpers import handle_request
 from ingestion_edge.dockerflow import init_app
-from sanic.request import Request
 import pytest
 import json
 

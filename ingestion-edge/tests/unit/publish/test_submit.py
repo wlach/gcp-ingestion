@@ -11,7 +11,7 @@ from sqlite3 import DatabaseError
 from unittest.mock import MagicMock
 from sanic.response import HTTPResponse
 from typing import Any, Dict
-import google.cloud.pubsub_v1.futures
+from concurrent.futures import Future
 import pytest
 
 
@@ -71,16 +71,16 @@ def validate(start_time: datetime, response: HTTPResponse, q: ListQueue):
 
 
 @pytest.fixture
-def client() -> MagicMock:
+def mock_client() -> MagicMock:
     client = MagicMock()
-    client.publish.return_value = google.cloud.pubsub_v1.futures.Future()
+    client.publish.return_value = Future()
     return client
 
 
-async def test_ok(client: MagicMock):
-    client.publish.return_value.set_result(None)
-    start_time, response = await call_submit(client)
-    q = ListQueue([call[0] + (call[1],) for call in client.publish.call_args_list])
+async def test_ok(mock_client: MagicMock):
+    mock_client.publish.return_value.set_result(None)
+    start_time, response = await call_submit(mock_client)
+    q = ListQueue([call[0] + (call[1],) for call in mock_client.publish.call_args_list])
     validate(start_time, response, q)
 
 
@@ -100,17 +100,17 @@ async def test_invalid(kwargs: Dict[str, Any]):
     assert response.body == b"header too large\n"
 
 
-async def test_database_error(client: MagicMock):
+async def test_database_error(mock_client: MagicMock):
     q = MagicMock()
     q.put.side_effect = DatabaseError()
-    client.publish.return_value.set_exception(TimeoutError())
-    _, response = await call_submit(client, q)
+    mock_client.publish.return_value.set_exception(TimeoutError())
+    _, response = await call_submit(mock_client, q)
     assert response.status == 507
     assert response.body == b""
 
 
-async def test_pubsub_error(client: MagicMock):
-    client.publish.return_value.set_exception(Exception())
+async def test_pubsub_error(mock_client: MagicMock):
+    mock_client.publish.return_value.set_exception(Exception())
     q = ListQueue([])
-    start_time, response = await call_submit(client, q)
+    start_time, response = await call_submit(mock_client, q)
     validate(start_time, response, q)

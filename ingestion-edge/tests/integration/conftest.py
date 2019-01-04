@@ -3,9 +3,8 @@
 # file, you can obtain one at http://mozilla.org/MPL/2.0/.
 
 from google.cloud.pubsub_v1 import PublisherClient, SubscriberClient
-from pubsub_emulator import PubsubEmulator
 from time import sleep
-from typing import Generator, Union
+from typing import Generator
 
 # importing from private module _pytest for types only
 import _pytest.config.argparsing
@@ -54,29 +53,43 @@ def pytest_addoption(parser: _pytest.config.argparsing.Parser):
 
 
 @pytest.fixture(scope="session")
-def pubsub(
-    request: _pytest.fixtures.SubRequest
-) -> Generator[Union[str, PubsubEmulator], None, None]:
+def pubsub(request: _pytest.fixtures.SubRequest) -> Generator[str, None, None]:
     if "PUBSUB_EMULATOR_HOST" in os.environ:
         yield "remote"
     elif request.config.getoption("server") is None:
-        emulator = PubsubEmulator(max_workers=1, port=0)
+        os.environ["PORT"] = "0"
+        process = subprocess.Popen([sys.executable, "-u", "-m", "pubsub_emulator"])
         try:
-            os.environ["PUBSUB_EMULATOR_HOST"] = "localhost:%d" % emulator.port
-            yield emulator
+            while process.poll() is None:
+                ports = [
+                    conn.laddr.port
+                    for conn in psutil.Process(process.pid).connections()
+                ]
+                if ports:
+                    break
+                sleep(0.1)
+            assert process.poll() is None  # server still running
+            os.environ["PUBSUB_EMULATOR_HOST"] = "localhost:%d" % ports.pop()
+            yield str(process.pid)
         finally:
-            emulator.server.stop(grace=None)
+            try:
+                # give the process one second to terminate gracefully and then kill it
+                process.terminate()
+                process.wait(1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
     else:
         yield "google"
 
 
 @pytest.fixture
-def publisher(pubsub: Union[str, PubsubEmulator]) -> PublisherClient:
+def publisher(pubsub: str) -> PublisherClient:
     return PublisherClient()
 
 
 @pytest.fixture
-def subscriber(pubsub: Union[str, PubsubEmulator]) -> SubscriberClient:
+def subscriber(pubsub: str) -> SubscriberClient:
     if "PUBSUB_EMULATOR_HOST" in os.environ:
         host = os.environ["PUBSUB_EMULATOR_HOST"]
         try:
@@ -97,11 +110,13 @@ def subscriber(pubsub: Union[str, PubsubEmulator]) -> SubscriberClient:
 
 @pytest.fixture(scope="session")
 def server(
-    pubsub: Union[str, PubsubEmulator], request: _pytest.fixtures.SubRequest
+    pubsub: str, request: _pytest.fixtures.SubRequest
 ) -> Generator[str, None, None]:
     _server = request.config.getoption("server")
     if _server is None:
-        process = subprocess.Popen([sys.executable, "-u", "-m", "ingestion_edge.wsgi"])
+        process = subprocess.Popen(
+            [sys.executable, "-u", "-m", "ingestion_edge.wsgi"], env=os.environ.copy()
+        )
         try:
             while process.poll() is None:
                 ports = [
@@ -114,8 +129,13 @@ def server(
             assert process.poll() is None  # server still running
             yield "http://localhost:%d" % ports.pop()
         finally:
-            process.kill()
-            process.wait()
+            try:
+                # give the process one second to terminate gracefully and then kill it
+                process.terminate()
+                process.wait(1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
     else:
         yield _server
 

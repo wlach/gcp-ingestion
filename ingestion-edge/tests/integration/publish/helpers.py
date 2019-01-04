@@ -7,26 +7,9 @@ from dataclasses import dataclass, field
 from google.cloud.pubsub_v1 import SubscriberClient
 from ingestion_edge.config import FLUSH_SLEEP_SECONDS, METADATA_HEADERS
 from typing import Dict, Optional
-from time import sleep
-import concurrent.futures
+from time import time, sleep
 import dateutil.parser
 import requests
-
-
-def wait_for_flush(subscriber, subscription, sleep_seconds):
-    """Wait for flush indefinitely."""
-    while True:
-        # detect flush by receiving one message from PubSub
-        received_messages = subscriber.pull(subscription, 1).received_messages
-        if received_messages:
-            # make the message available again
-            subscriber.modify_ack_deadline(
-                subscription, [received_messages[0].ack_id], 0
-            )
-            # flush detected
-            break
-        # flush not detected so sleep and try again
-        sleep(sleep_seconds)
 
 
 @dataclass
@@ -69,7 +52,6 @@ class IntegrationTest:
         """Assert queue is empty if server is not a cluster."""
         if not self.uses_cluster:
             status = self.requests_session.get(self.server + "/__heartbeat__").json()
-            print(status)
             # queue size goes up to info when not empty
             assert status["checks"]["check_queue_size"] == "info"
 
@@ -97,18 +79,30 @@ class IntegrationTest:
 
     def assert_flushed(self):
         """Wait for one queued message to reach PubSub."""
-        # use timeout via threadpool future to wait for flush
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # pass kwargs to make wait_for_flush serializable
-            kwargs = dict(
-                subscriber=self.subscriber,
-                subscription=self.subscription,
-                sleep_seconds=FLUSH_SLEEP_SECONDS / 10,
-            )
-            # submit task and get result with timeout
-            executor.submit(wait_for_flush, **kwargs).result(
-                timeout=FLUSH_SLEEP_SECONDS + 1
-            )
+        start = time()
+        # wait up to two flush cycles for a flush to succeed
+        while time() - start < FLUSH_SLEEP_SECONDS * 2:
+            received_messages = self.subscriber.pull(
+                self.subscription, 1, True
+            ).received_messages
+            if received_messages:
+                # make the message available again
+                self.subscriber.modify_ack_deadline(
+                    self.subscription, [received_messages[0].ack_id], 0
+                )
+                # flush detected
+                break
+            # flush not detected so sleep and try again
+            sleep(FLUSH_SLEEP_SECONDS / 2)
+        else:
+            assert False, "flush not detected"
+        for i in range(3):
+            try:
+                self.assert_queue_empty()
+            except AssertionError:
+                sleep(3)
+            else:
+                break
 
     def assert_delivered(self):
         """Assert message delivered to PubSub matches message sent."""

@@ -6,12 +6,13 @@
 
 from google.cloud.pubsub_v1.proto import pubsub_pb2_grpc, pubsub_pb2
 from google.protobuf import empty_pb2, json_format
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 import concurrent.futures
 import grpc
 import logging
 import os
 import time
+import threading
 import uuid
 
 
@@ -34,6 +35,7 @@ class Subscription:
         """Initialize subscription messages queue."""
         self.published = []
         self.pulled = {}
+        self.condition = threading.Condition()
 
 
 class PubsubEmulator(
@@ -44,7 +46,6 @@ class PubsubEmulator(
     def __init__(
         self,
         host: str = os.environ.get("HOST", "0.0.0.0"),
-        max_workers: int = int(os.environ.get("MAX_WORKERS", 1)),
         port: int = int(os.environ.get("PORT", 0)),
     ):
         """Initialize a new PubsubEmulator and add it to a gRPC server."""
@@ -55,13 +56,12 @@ class PubsubEmulator(
         self.sleep: Optional[float] = None
         self.host = host
         self.port = port
-        self.max_workers = max_workers
         self.create_server()
 
     def create_server(self):
         """Create and start a new grpc.Server configured with PubsubEmulator."""
         self.server = grpc.server(
-            concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers),
+            concurrent.futures.ThreadPoolExecutor(),
             options=[
                 ("grpc.max_receive_message_length", -1),
                 ("grpc.max_send_message_length", -1),
@@ -132,7 +132,7 @@ class PubsubEmulator(
         self, request: pubsub_pb2.PublishRequest, context: grpc.ServicerContext
     ) -> pubsub_pb2.PublishResponse:
         """Publish implementation."""
-        self.logger.debug("Publish(%.100s)", LazyFormat(request))
+        self.logger.debug("Publish(%.1536s)", LazyFormat(request))
         if request.topic in self.status_codes:
             context.abort(self.status_codes[request.topic], "Override")
         if self.sleep is not None:
@@ -145,31 +145,36 @@ class PubsubEmulator(
         for _id, message in zip(message_ids, request.messages):
             message.message_id = _id
         for subscription in subscriptions:
-            subscription.published.extend(request.messages)
+            with subscription.condition:
+                subscription.published.extend(request.messages)
+                subscription.condition.notify_all()
         return pubsub_pb2.PublishResponse(message_ids=message_ids)
 
     def Pull(
         self, request: pubsub_pb2.PullRequest, context: grpc.ServicerContext
     ) -> pubsub_pb2.PullResponse:
         """Pull implementation."""
-        self.logger.debug("Pull(%.100s)", LazyFormat(request))
+        self.logger.debug("Pull(%s)", LazyFormat(request))
         try:
             subscription = self.subscriptions[request.subscription]
         except KeyError:
             context.abort(grpc.StatusCode.NOT_FOUND, "Subscription not found")
-        messages = subscription.published[: request.max_messages or 100]
-        subscription.pulled.update(
-            {message.message_id: message for message in messages}
-        )
-        for message in messages:
-            try:
-                subscription.published.remove(message)
-            except ValueError:
-                pass
-        received_messages = [
-            pubsub_pb2.ReceivedMessage(ack_id=message.message_id, message=message)
-            for message in messages
-        ]
+        with subscription.condition:
+            if not request.return_immediately and not subscription.published:
+                subscription.condition.wait(10)
+            messages = subscription.published[: request.max_messages or 100]
+            subscription.pulled.update(
+                {message.message_id: message for message in messages}
+            )
+            for message in messages:
+                try:
+                    subscription.published.remove(message)
+                except ValueError:
+                    pass
+            received_messages = [
+                pubsub_pb2.ReceivedMessage(ack_id=message.message_id, message=message)
+                for message in messages
+            ]
         return pubsub_pb2.PullResponse(received_messages=received_messages)
 
     def Acknowledge(

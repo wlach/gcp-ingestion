@@ -69,7 +69,7 @@ def test_submit_pubsub_server_error_disk_full(
 
     # restore pubsub status
     publisher.update_topic({"name": topic}, {"paths": ["status_code="]})
-    integration_test.assert_flushed_and_delivered(data=data)
+    integration_test.assert_flushed_and_delivered()
 
 
 @pytest.mark.skip("reclaiming the emulator port hangs indefinitely")

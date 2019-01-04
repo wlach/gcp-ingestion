@@ -6,7 +6,6 @@ from ..helpers import handle_request
 from ingestion_edge import publish
 from ingestion_edge.config import Route
 from sanic import Sanic
-from sanic.request import Request
 import pytest
 
 ROUTE_TABLE = [
@@ -49,13 +48,13 @@ def app():
 )
 async def test_endpoint(app, kwargs, method, mocker, uri_bytes):
     mocker.patch("ingestion_edge.publish.SQLiteAckQueue", dict)
-    mocker.patch("ingestion_edge.publish.PublisherClient", lambda: None)
+    client = mocker.patch("ingestion_edge.publish.PublisherClient").return_value
     mocker.patch("ingestion_edge.publish.submit", lambda _, **kw: kw)
     app.config["ROUTE_TABLE"] = ROUTE_TABLE
     publish.init_app(app)
     response = await handle_request(app, uri_bytes, method)
     assert response == dict(
-        client=None, timeout=None, q={"path": ":memory:"}, metadata_headers={}, **kwargs
+        client=client, q={"path": ":memory:"}, metadata_headers={}, **kwargs
     )
 
 
