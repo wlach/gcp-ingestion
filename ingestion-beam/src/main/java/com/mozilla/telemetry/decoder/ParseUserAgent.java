@@ -5,6 +5,7 @@
 package com.mozilla.telemetry.decoder;
 
 import com.google.common.collect.Sets;
+import com.mozilla.telemetry.transforms.PubsubConstraints;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
@@ -22,6 +23,12 @@ import org.apache.beam.sdk.values.PCollection;
  */
 public class ParseUserAgent
     extends PTransform<PCollection<PubsubMessage>, PCollection<PubsubMessage>> {
+
+  public static ParseUserAgent of() {
+    return INSTANCE;
+  }
+
+  ////////
 
   private static class Field implements Serializable {
 
@@ -45,6 +52,9 @@ public class ParseUserAgent
   private static final Field USER_AGENT_VERSION = new Field("user_agent_version", "AgentVersion");
   private static final Set<String> parseFailures = Sets.newHashSet("Unknown", "??");
 
+  private static final Fn FN = new Fn();
+  private static final ParseUserAgent INSTANCE = new ParseUserAgent();
+
   private static class Fn extends SimpleFunction<PubsubMessage, PubsubMessage> {
 
     static final UserAgentAnalyzer analyzer = UserAgentAnalyzer.newBuilder()
@@ -54,9 +64,11 @@ public class ParseUserAgent
         .dropDefaultResources().addResources("UserAgents/*.yaml").build();
 
     @Override
-    public PubsubMessage apply(PubsubMessage value) {
+    public PubsubMessage apply(PubsubMessage message) {
+      message = PubsubConstraints.ensureNonNull(message);
+
       // Copy attributes
-      Map<String, String> attributes = new HashMap<String, String>(value.getAttributeMap());
+      Map<String, String> attributes = new HashMap<String, String>(message.getAttributeMap());
 
       if (attributes.containsKey(USER_AGENT)) {
         // Extract user agent fields
@@ -74,14 +86,16 @@ public class ParseUserAgent
         attributes.remove(USER_AGENT);
       }
       // Return new message
-      return new PubsubMessage(value.getPayload(), attributes);
+      return new PubsubMessage(message.getPayload(), attributes);
     }
   }
-
-  private static final Fn FN = new Fn();
 
   @Override
   public PCollection<PubsubMessage> expand(PCollection<PubsubMessage> input) {
     return input.apply(MapElements.via(FN));
   }
+
+  private ParseUserAgent() {
+  }
+
 }

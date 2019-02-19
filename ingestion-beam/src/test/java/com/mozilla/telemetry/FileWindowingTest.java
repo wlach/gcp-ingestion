@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import nl.basjes.shaded.org.springframework.core.io.Resource;
 import nl.basjes.shaded.org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.apache.beam.sdk.io.Compression;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessageWithAttributesCoder;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
@@ -63,7 +64,8 @@ public class FileWindowingTest implements Serializable {
     SinkOptions options = PipelineOptionsFactory.create().as(SinkOptions.class);
     options.setOutputType(OutputType.file);
     options.setOutputFileFormat(OutputFileFormat.text);
-    options.setOutputNumShards(1);
+    options.setOutputFileCompression(Compression.UNCOMPRESSED);
+    options.setOutputNumShards(pipeline.newProvider(1));
     options.setWindowDuration("10 minutes");
     options.setOutput(pipeline.newProvider(output));
 

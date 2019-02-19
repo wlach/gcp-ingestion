@@ -5,11 +5,18 @@
 package com.mozilla.telemetry.decoder;
 
 import com.mozilla.telemetry.transforms.MapElementsWithErrors;
+import com.mozilla.telemetry.transforms.PubsubConstraints;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
 
 public class ParseUri extends MapElementsWithErrors.ToPubsubMessageFrom<PubsubMessage> {
+
+  public static ParseUri of() {
+    return INSTANCE;
+  }
+
+  ////////
 
   private static class InvalidUriException extends Exception {
 
@@ -25,11 +32,16 @@ public class ParseUri extends MapElementsWithErrors.ToPubsubMessageFrom<PubsubMe
   private static class NullUriException extends InvalidUriException {
   }
 
-  private static final String TELEMETRY_URI_PREFIX = "/submit/telemetry/";
-  private static final String[] TELEMETRY_URI_SUFFIX_ELEMENTS = new String[] { "document_id",
+  private ParseUri() {
+  }
+
+  private static final ParseUri INSTANCE = new ParseUri();
+
+  public static final String TELEMETRY_URI_PREFIX = "/submit/telemetry/";
+  public static final String[] TELEMETRY_URI_SUFFIX_ELEMENTS = new String[] { "document_id",
       "document_type", "app_name", "app_version", "app_update_channel", "app_build_id" };
-  private static final String GENERIC_URI_PREFIX = "/submit/";
-  private static final String[] GENERIC_URI_SUFFIX_ELEMENTS = new String[] { "document_namespace",
+  public static final String GENERIC_URI_PREFIX = "/submit/";
+  public static final String[] GENERIC_URI_SUFFIX_ELEMENTS = new String[] { "document_namespace",
       "document_type", "document_version", "document_id" };
 
   private static Map<String, String> zip(String[] keys, String[] values)
@@ -47,9 +59,10 @@ public class ParseUri extends MapElementsWithErrors.ToPubsubMessageFrom<PubsubMe
   }
 
   @Override
-  protected PubsubMessage processElement(PubsubMessage element) throws InvalidUriException {
+  protected PubsubMessage processElement(PubsubMessage message) throws InvalidUriException {
+    message = PubsubConstraints.ensureNonNull(message);
     // Copy attributes
-    final Map<String, String> attributes = new HashMap<>(element.getAttributeMap());
+    final Map<String, String> attributes = new HashMap<>(message.getAttributeMap());
 
     // parse uri based on prefix
     final String uri = attributes.get("uri");
@@ -67,7 +80,6 @@ public class ParseUri extends MapElementsWithErrors.ToPubsubMessageFrom<PubsubMe
     } else {
       throw new InvalidUriException("Unknown URI prefix");
     }
-    attributes.remove("uri");
-    return new PubsubMessage(element.getPayload(), attributes);
+    return new PubsubMessage(message.getPayload(), attributes);
   }
 }

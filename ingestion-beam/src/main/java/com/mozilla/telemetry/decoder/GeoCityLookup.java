@@ -12,6 +12,7 @@ import com.maxmind.geoip2.exception.GeoIp2Exception;
 import com.maxmind.geoip2.model.CityResponse;
 import com.maxmind.geoip2.record.City;
 import com.maxmind.geoip2.record.Subdivision;
+import com.mozilla.telemetry.transforms.PubsubConstraints;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,12 +44,20 @@ import org.apache.beam.sdk.values.PCollection;
 public class GeoCityLookup
     extends PTransform<PCollection<PubsubMessage>, PCollection<PubsubMessage>> {
 
+  public static GeoCityLookup of(ValueProvider<String> geoCityDatabase,
+      ValueProvider<String> geoCityFilter) {
+    return new GeoCityLookup(geoCityDatabase, geoCityFilter);
+  }
+
+  /////////
+
   private static final Pattern GEO_NAME_PATTERN = Pattern.compile("^(\\d+).*");
 
   private final ValueProvider<String> geoCityDatabase;
   private final ValueProvider<String> geoCityFilter;
 
-  public GeoCityLookup(ValueProvider<String> geoCityDatabase, ValueProvider<String> geoCityFilter) {
+  private GeoCityLookup(ValueProvider<String> geoCityDatabase,
+      ValueProvider<String> geoCityFilter) {
     this.geoCityDatabase = geoCityDatabase;
     this.geoCityFilter = geoCityFilter;
   }
@@ -59,38 +68,57 @@ public class GeoCityLookup
     private transient DatabaseReader geoIP2City;
     private transient Set<Integer> allowedCities;
 
-    private final Counter countIpForwarded = Metrics.counter(Fn.class, "ip-from-x-forwarded-for");
-    private final Counter countIpRemoteAddr = Metrics.counter(Fn.class, "ip-from-remote-addr");
-    private final Counter countPipelineProxy = Metrics.counter(Fn.class, "count-pipeline-proxy");
-    private final Counter foundIp = Metrics.counter(Fn.class, "found-ip");
-    private final Counter foundCity = Metrics.counter(Fn.class, "found-city");
-    private final Counter foundCityAllowed = Metrics.counter(Fn.class, "found-city-allowed");
-    private final Counter foundGeo1 = Metrics.counter(Fn.class, "found-geo-subdivision-1");
-    private final Counter foundGeo2 = Metrics.counter(Fn.class, "found-geo-subdivision-2");
+    private final Counter countGeoAlreadyApplied = Metrics.counter(Fn.class, "geo_already_applied");
+    private final Counter countIpForwarded = Metrics.counter(Fn.class, "ip_from_x_forwarded_for");
+    private final Counter countIpRemoteAddr = Metrics.counter(Fn.class, "ip_from_remote_addr");
+    private final Counter countPipelineProxy = Metrics.counter(Fn.class, "count_pipeline_proxy");
+    private final Counter foundIp = Metrics.counter(Fn.class, "found_ip");
+    private final Counter foundCity = Metrics.counter(Fn.class, "found_city");
+    private final Counter foundCityAllowed = Metrics.counter(Fn.class, "found_city_allowed");
+    private final Counter foundGeo1 = Metrics.counter(Fn.class, "found_geo_subdivision_1");
+    private final Counter foundGeo2 = Metrics.counter(Fn.class, "found_geo_subdivision_2");
 
     @Override
-    public PubsubMessage apply(PubsubMessage value) {
+    public PubsubMessage apply(PubsubMessage message) {
+      message = PubsubConstraints.ensureNonNull(message);
       try {
         if (geoIP2City == null) {
           // Throws IOException
           loadResourcesOnFirstMessage();
         }
 
+        if (message.getAttributeMap().containsKey("geo_country")) {
+          // Return early since geo has already been applied;
+          // we are likely reprocessing a message from error output.
+          countGeoAlreadyApplied.inc();
+          return message;
+        }
+
         // copy attributes
-        Map<String, String> attributes = new HashMap<String, String>(value.getAttributeMap());
+        Map<String, String> attributes = new HashMap<String, String>(message.getAttributeMap());
 
         // Determine client ip
         String ip;
-        if (attributes.containsKey("x_forwarded_for")) {
-          String[] ips = attributes.get("x_forwarded_for").split(" *, *");
+        String xff = attributes.get("x_forwarded_for");
+        if (xff != null) {
+          // Google's load balancer will append the immediate sending client IP and a global
+          // forwarding rule IP to any existing content in X-Forwarded-For as documented in:
+          // https://cloud.google.com/load-balancing/docs/https/#components
+          //
+          // If the request is forwarded from the old AWS infrastructure, X-Pipeline-Proxy will be
+          // set and we expect one or more IPs at the front of X-Forwarded-For. In practice, many
+          // of the "first" addresses are bogus or internal, so we target the "last" address
+          // before the GCP global forwarding rule IP and the tee proxy (if present).
+          String[] ips = xff.split("\\s*,\\s*");
+          int xffTargetIndex;
           if (attributes.containsKey("x_pipeline_proxy")) {
             // Use the ip reported by the proxy load balancer
-            ip = ips[ips.length - 2];
+            xffTargetIndex = ips.length - 3;
             countPipelineProxy.inc();
           } else {
-            // Use the ip reported by the ingestion-edge load balancer
-            ip = ips[ips.length - 1];
+            xffTargetIndex = ips.length - 2;
           }
+          ip = ips[Math.max(xffTargetIndex, 0)];
           countIpForwarded.inc();
         } else {
           ip = attributes.getOrDefault("remote_addr", "");
@@ -133,7 +161,7 @@ public class GeoCityLookup
         // remove null attributes because the coder can't handle them
         attributes.values().removeIf(Objects::isNull);
 
-        return new PubsubMessage(value.getPayload(), attributes);
+        return new PubsubMessage(message.getPayload(), attributes);
       } catch (IOException e) {
         // Re-throw unchecked, so that the pipeline will fail at run time if it occurs
         throw new UncheckedIOException(e);

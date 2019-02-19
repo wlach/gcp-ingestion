@@ -68,7 +68,8 @@ jobs:
 
   ingestion-beam:
     docker:
-    - image: maven
+    # Pin the maven image due to observed VM aborts on CircleCI 2018-01-08.
+    - image: maven@sha256:955e28c9a64b439591adfd43da77586c8bcd45f51627bf9144e297386c6a6be3
     steps:
     - checkout
     - restore_cache: &restore_cache_beam
@@ -78,9 +79,11 @@ jobs:
           - maven-repo-v1-{{ .Branch }}-{{ checksum "ingestion-beam/pom.xml" }}
           - maven-repo-v1-{{ .Branch }}-
           - maven-repo-v1-
-    - run: &download_geolite2
-        name: Download Geolite2
-        command: ingestion-beam/bin/download-geolite2
+    - run: &download_beam_resources
+        name: Download Geolite2 and schemas
+        command: |
+          ingestion-beam/bin/download-geolite2
+          ingestion-beam/bin/download-schemas
     - run:
         name: Maven Test
         command: cd ingestion-beam && mvn clean test
@@ -94,7 +97,8 @@ jobs:
 
   ingestion-beam-integration:
     docker:
-    - image: maven
+    # Pin the maven image due to observed VM aborts on CircleCI 2018-01-08.
+    - image: maven@sha256:955e28c9a64b439591adfd43da77586c8bcd45f51627bf9144e297386c6a6be3
     steps:
     - run:
         name: Early return if this build is from a forked PR
@@ -107,7 +111,7 @@ jobs:
     - restore_cache:
         <<: *restore_cache_beam
     - run:
-        <<: *download_geolite2
+        <<: *download_beam_resources
     - run:
         name: Maven Test
         # Google's client libraries will check for GOOGLE_APPLICATION_CREDENTIALS

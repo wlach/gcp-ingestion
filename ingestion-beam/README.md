@@ -388,8 +388,11 @@ unmodified.
 ### GeoIP Lookup
 
 1. Extract `ip` from the `x_forwarded_for` attribute
-   * when the `x_pipeline_proxy` attribute is present, use the second nearest
-     value, otherwise use the most recent value
+   * when the `x_pipeline_proxy` attribute is not present, use the
+     second-to-last value (since the last value is a forwarding rule IP
+     added by Google load balancer)
+   * when the `x_pipeline_proxy` attribute is present, use the third-to-last
+     value (since the tee introduces an additional proxy IP)
    * fall back to the `remote_addr` attribute, then to an empty string
 1. Execute the following steps until one fails and ignore the exception
     1. Parse `ip` using `InetAddress.getByName`
@@ -421,12 +424,14 @@ Example:
 mkdir -p tmp/
 echo '{"payload":"dGVzdA==","attributeMap":{"remote_addr":"63.245.208.195"}}' > tmp/input.json
 
-# Download `GeoLite2-City.mmdb`
+# Download `GeoLite2-City.mmdb` and `schemas.tar.gz`
 ./bin/download-geolite2
+./bin/download-schemas
 
 # do geo lookup on messages to stdout
 ./bin/mvn compile exec:java -Dexec.mainClass=com.mozilla.telemetry.Decoder -Dexec.args="\
     --geoCityDatabase=GeoLite2-City.mmdb \
+    --schemasLocation=schemas.tar.gz \
     --inputType=file \
     --input=tmp/input.json \
     --outputType=stdout \

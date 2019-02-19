@@ -9,12 +9,14 @@ environment variables.
 """
 
 from dataclasses import dataclass
+from logging import getLogger
 from logging.config import dictConfig
 from os import environ
 from typing import Tuple
 import json
 import persistqueue.serializers.msgpack
 
+log_level = environ.get("LOG_LEVEL", "DEBUG").upper()
 dictConfig(
     {
         "version": 1,
@@ -26,17 +28,18 @@ dictConfig(
         },
         "handlers": {
             "console": {
-                "level": "DEBUG",
+                "level": log_level,
                 "class": "logging.StreamHandler",
                 "formatter": "json",
             }
         },
         "loggers": {
-            "request.summary": {"handlers": ["console"], "level": "DEBUG"},
-            "ingestion-edge": {"handlers": ["console"], "level": "DEBUG"},
+            "request.summary": {"handlers": ["console"], "level": log_level},
+            "ingestion-edge": {"handlers": ["console"], "level": log_level},
         },
     }
 )
+logger = getLogger("ingestion-edge")
 
 
 @dataclass
@@ -76,10 +79,6 @@ METADATA_HEADERS = {
 }
 
 PUBLISH_TIMEOUT_SECONDS = float(environ.get("PUBLISH_TIMEOUT_SECONDS", 1))
-
-FLUSH_PUBLISH_TIMEOUT_SECONDS = float(
-    environ.get("FLUSH_PUBLISH_TIMEOUT_SECONDS", PUBLISH_TIMEOUT_SECONDS)
-)
 
 FLUSH_CONCURRENT_BYTES = int(environ.get("FLUSH_CONCURRENT_BYTES", 1e7))
 

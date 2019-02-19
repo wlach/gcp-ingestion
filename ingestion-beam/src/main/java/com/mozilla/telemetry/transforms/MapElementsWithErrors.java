@@ -24,7 +24,7 @@ import org.apache.beam.sdk.values.TupleTagList;
  * @param <OutputT> type of elements in the output {@link PCollection} for {@code mainTag}.
  */
 public abstract class MapElementsWithErrors<InputT, OutputT>
-    extends PTransform<PCollection<? extends InputT>, ResultWithErrors<PCollection<OutputT>>> {
+    extends PTransform<PCollection<InputT>, WithErrors.Result<PCollection<OutputT>>> {
 
   private final TupleTag<OutputT> successTag = new TupleTag<OutputT>() {
   };
@@ -39,9 +39,9 @@ public abstract class MapElementsWithErrors<InputT, OutputT>
    *
    * @param element that should be processed.
    * @return an instance of {@code OutputT} that goes into {@code mainTag}.
-   * @throws Throwable if the element should go into the {@code errorTag}.
+   * @throws Exception if the element should go into the {@code errorTag}.
    */
-  protected abstract OutputT processElement(InputT element) throws Throwable;
+  protected abstract OutputT processElement(InputT element) throws Exception;
 
   /**
    * Method that returns one error PubsubMessage from an exception thrown by {@code processElement}.
@@ -52,26 +52,26 @@ public abstract class MapElementsWithErrors<InputT, OutputT>
    * @param e exception thrown by {@code processElement}.
    * @return a {@link PubsubMessage} that holds {@code element} and {@code e}.
    */
-  protected abstract PubsubMessage processError(InputT element, Throwable e);
+  protected abstract PubsubMessage processError(InputT element, Exception e);
 
   /**
    * Default processError method for {@code InputT} == {@link PubsubMessage}.
    */
-  protected PubsubMessage processError(PubsubMessage element, Throwable e) {
+  protected PubsubMessage processError(PubsubMessage element, Exception e) {
     return FailureMessage.of(this, element, e);
   }
 
   /**
    * Default processError method for {@code InputT} == {@link String}.
    */
-  protected PubsubMessage processError(String element, Throwable e) {
+  protected PubsubMessage processError(String element, Exception e) {
     return FailureMessage.of(this, element, e);
   }
 
   /**
    * Default processError method for {@code InputT} == {@code byte[]}.
    */
-  protected PubsubMessage processError(byte[] element, Throwable e) {
+  protected PubsubMessage processError(byte[] element, Exception e) {
     return FailureMessage.of(this, element, e);
   }
 
@@ -82,10 +82,16 @@ public abstract class MapElementsWithErrors<InputT, OutputT>
 
     @ProcessElement
     public void processElementOrError(@Element InputT element, MultiOutputReceiver out) {
+      OutputT processed = null;
+      boolean exceptionWasThrown = false;
       try {
-        out.get(successTag).output(processElement(element));
-      } catch (Throwable e) {
+        processed = processElement(element);
+      } catch (Exception e) {
+        exceptionWasThrown = true;
         out.get(errorTag).output(processError(element, e));
+      }
+      if (!exceptionWasThrown) {
+        out.get(successTag).output(processed);
       }
     }
   }
@@ -96,10 +102,10 @@ public abstract class MapElementsWithErrors<InputT, OutputT>
   private final DoFnWithErrors fn = new DoFnWithErrors();
 
   @Override
-  public ResultWithErrors<PCollection<OutputT>> expand(PCollection<? extends InputT> input) {
+  public WithErrors.Result<PCollection<OutputT>> expand(PCollection<InputT> input) {
     PCollectionTuple tuple = input
         .apply(ParDo.of(fn).withOutputTags(successTag, TupleTagList.of(errorTag)));
-    return ResultWithErrors.of(tuple.get(successTag), successTag, tuple.get(errorTag), errorTag);
+    return WithErrors.Result.of(tuple.get(successTag), successTag, tuple.get(errorTag), errorTag);
   }
 
   /**
@@ -109,9 +115,8 @@ public abstract class MapElementsWithErrors<InputT, OutputT>
       extends MapElementsWithErrors<InputT, PubsubMessage> {
 
     @Override
-    public ResultWithErrors<PCollection<PubsubMessage>> expand(
-        PCollection<? extends InputT> input) {
-      ResultWithErrors<PCollection<PubsubMessage>> result = super.expand(input);
+    public WithErrors.Result<PCollection<PubsubMessage>> expand(PCollection<InputT> input) {
+      WithErrors.Result<PCollection<PubsubMessage>> result = super.expand(input);
       result.output().setCoder(PubsubMessageWithAttributesCoder.of());
       return result;
     }

@@ -4,21 +4,22 @@
 
 package com.mozilla.telemetry.decoder;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.io.Resources;
+import com.mozilla.telemetry.metrics.PerDocTypeCounter;
+import com.mozilla.telemetry.schemas.SchemaNotFoundException;
+import com.mozilla.telemetry.schemas.SchemaStore;
 import com.mozilla.telemetry.transforms.MapElementsWithErrors;
+import com.mozilla.telemetry.transforms.PubsubConstraints;
 import com.mozilla.telemetry.util.Json;
 import java.io.IOException;
-import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
-import nl.basjes.shaded.org.springframework.core.io.Resource;
-import nl.basjes.shaded.org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
-import org.apache.commons.text.StringSubstitutor;
+import org.apache.beam.sdk.metrics.Distribution;
+import org.apache.beam.sdk.metrics.Metrics;
+import org.apache.beam.sdk.options.ValueProvider;
 import org.everit.json.schema.Schema;
-import org.everit.json.schema.loader.SchemaLoader;
-import org.json.JSONException;
+import org.everit.json.schema.ValidationException;
+import org.everit.json.schema.Validator;
 import org.json.JSONObject;
 
 /**
@@ -30,86 +31,48 @@ import org.json.JSONObject;
  */
 public class ParsePayload extends MapElementsWithErrors.ToPubsubMessageFrom<PubsubMessage> {
 
-  private static class SchemaNotFoundException extends Exception {
-
-    SchemaNotFoundException(String message) {
-      super(message);
-    }
-
-    static SchemaNotFoundException forName(String name) {
-      return new SchemaNotFoundException("No schema with name: " + name);
-    }
+  public static ParsePayload of(ValueProvider<String> schemasLocation) {
+    return new ParsePayload(schemasLocation);
   }
 
-  private static final Map<String, Schema> schemas = new HashMap<>();
+  ////////
 
-  @VisibleForTesting
-  public static int numLoadedSchemas() {
-    return schemas.size();
-  }
+  private final Distribution parseTimer = Metrics.distribution(ParsePayload.class,
+      "json_parse_millis");
+  private final Distribution validateTimer = Metrics.distribution(ParsePayload.class,
+      "json_validate_millis");
 
-  static {
-    try {
-      // Load all schemas from Java resources at classloading time so we can fail fast in tests,
-      // but this pre-loaded state won't be available to workers since PTransforms are only
-      // pseudo-serializable and state outside the DoFn won't get sent.
-      loadAllSchemas();
-    } catch (Exception e) {
-      throw new RuntimeException("Unexpected error while loading JSON schemas", e);
-    }
-  }
+  private final ValueProvider<String> schemasLocation;
 
-  private static void loadAllSchemas() throws SchemaNotFoundException, IOException {
-    final Resource[] resources = new PathMatchingResourcePatternResolver()
-        .getResources("classpath*:schemas/**/*.schema.json");
-    for (Resource resource : resources) {
-      final String name = resource.getURL().getPath().replaceFirst("^.*/schemas/", "schemas/");
-      loadSchema(name);
-    }
-  }
+  private transient Validator validator;
+  private transient SchemaStore schemaStore;
 
-  private static void loadSchema(String name) throws SchemaNotFoundException {
-    try {
-      final URL url = Resources.getResource(name);
-      final byte[] schema = Resources.toByteArray(url);
-      // Throws IOException if not a valid json object
-      JSONObject rawSchema = Json.readJSONObject(schema);
-      schemas.put(name, SchemaLoader.load(rawSchema));
-    } catch (IOException e) {
-      throw SchemaNotFoundException.forName(name);
-    }
-  }
-
-  private static Schema getSchema(String name) throws SchemaNotFoundException {
-    Schema schema = schemas.get(name);
-    if (schema == null) {
-      loadSchema(name);
-      schema = schemas.get(name);
-    }
-    return schema;
-  }
-
-  private static Schema getSchema(Map<String, String> attributes) throws SchemaNotFoundException {
-    if (attributes == null) {
-      throw new SchemaNotFoundException("No schema for message with null attributeMap");
-    }
-    // This is the path provided by mozilla-pipeline-schemas
-    final String name = StringSubstitutor.replace("schemas/${document_namespace}/${document_type}/"
-        + "${document_type}.${document_version}.schema.json", attributes);
-    return getSchema(name);
+  private ParsePayload(ValueProvider<String> schemasLocation) {
+    this.schemasLocation = schemasLocation;
   }
 
   @Override
-  protected PubsubMessage processElement(PubsubMessage element)
+  protected PubsubMessage processElement(PubsubMessage message)
       throws SchemaNotFoundException, IOException {
-    // Throws IOException if not a valid json object
-    final JSONObject json = Json.readJSONObject(element.getPayload());
+    message = PubsubConstraints.ensureNonNull(message);
+    Map<String, String> attributes = new HashMap<>(message.getAttributeMap());
 
-    Map<String, String> attributes;
-    if (element.getAttributeMap() == null) {
-      attributes = new HashMap<>();
-    } else {
-      attributes = new HashMap<>(element.getAttributeMap());
+    if (schemaStore == null) {
+      schemaStore = SchemaStore.of(schemasLocation);
+    }
+
+    final int submissionBytes = message.getPayload().length;
+
+    JSONObject json;
+    try {
+      json = parseTimed(message.getPayload());
+    } catch (IOException e) {
+      Map<String, String> attrs = schemaStore.docTypeExists(message.getAttributeMap())
+          ? message.getAttributeMap()
+          : null; // null attributes will cause docType to show up as "unknown_doc_type" in metrics
+      PerDocTypeCounter.inc(attrs, "error_json_parse");
+      PerDocTypeCounter.inc(attrs, "error_submission_bytes", submissionBytes);
+      throw e;
     }
 
     // Remove any top-level "metadata" field if it exists, and attempt to parse it as a
@@ -125,25 +88,75 @@ public class ParsePayload extends MapElementsWithErrors.ToPubsubMessageFrom<Pubs
       }
     }
 
+    boolean validDocType = schemaStore.docTypeExists(attributes);
+    if (!validDocType) {
+      PerDocTypeCounter.inc(null, "error_invalid_doc_type");
+      PerDocTypeCounter.inc(null, "error_submission_bytes", submissionBytes);
+      throw new SchemaNotFoundException(String.format("No such docType: %s/%s",
+          attributes.get("document_namespace"), attributes.get("document_type")));
+    }
+
     // If no "document_version" attribute was parsed from the URI, this element must be from the
     // /submit/telemetry endpoint and we now need to grab version from the payload.
     if (!attributes.containsKey("document_version")) {
-      try {
+      if (json.has("version")) {
         String version = json.get("version").toString();
         attributes.put("document_version", version);
-      } catch (JSONException e) {
+      } else if (json.has("v")) {
+        String version = json.get("v").toString();
+        attributes.put("document_version", version);
+      } else {
+        PerDocTypeCounter.inc(attributes, "error_missing_version");
+        PerDocTypeCounter.inc(attributes, "error_submission_bytes", submissionBytes);
         throw new SchemaNotFoundException("Element was assumed to be a telemetry message because"
             + " it contains no document_version attribute, but the payload does not include"
-            + " the top-level 'version' field expected for a telemetry document");
+            + " the top-level 'version' or 'v' field expected for a telemetry document");
       }
     }
 
     // Throws SchemaNotFoundException if there's no schema
-    final Schema schema = getSchema(attributes);
-    // Throws ValidationException if schema doesn't match
-    schema.validate(json);
+    Schema schema;
+    try {
+      schema = schemaStore.getSchema(attributes);
+    } catch (SchemaNotFoundException e) {
+      PerDocTypeCounter.inc(attributes, "error_schema_not_found");
+      PerDocTypeCounter.inc(attributes, "error_submission_bytes", submissionBytes);
+      throw e;
+    }
+
+    try {
+      validateTimed(schema, json);
+    } catch (ValidationException e) {
+      PerDocTypeCounter.inc(attributes, "error_schema_validation");
+      PerDocTypeCounter.inc(attributes, "error_submission_bytes", submissionBytes);
+      throw e;
+    }
 
     byte[] normalizedPayload = json.toString().getBytes();
+
+    PerDocTypeCounter.inc(attributes, "valid_submission");
+    PerDocTypeCounter.inc(attributes, "valid_submission_bytes", submissionBytes);
+
     return new PubsubMessage(normalizedPayload, attributes);
+  }
+
+  private JSONObject parseTimed(byte[] bytes) throws IOException {
+    long startTime = System.currentTimeMillis();
+    final JSONObject json = Json.readJSONObject(bytes);
+    long endTime = System.currentTimeMillis();
+    parseTimer.update(endTime - startTime);
+    return json;
+  }
+
+  private void validateTimed(Schema schema, JSONObject json) {
+    if (validator == null) {
+      // Without failEarly(), a pathological payload may cause the validator to consume all memory;
+      // https://github.com/mozilla/gcp-ingestion/issues/374
+      validator = Validator.builder().failEarly().build();
+    }
+    long startTime = System.currentTimeMillis();
+    validator.performValidation(schema, json);
+    long endTime = System.currentTimeMillis();
+    validateTimer.update(endTime - startTime);
   }
 }

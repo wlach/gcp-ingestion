@@ -9,12 +9,14 @@ import com.mozilla.telemetry.Sink;
 import com.mozilla.telemetry.util.Time;
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.beam.sdk.io.Compression;
 import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.Hidden;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.Validation;
 import org.apache.beam.sdk.options.ValueProvider;
+import org.apache.beam.sdk.options.ValueProvider.NestedValueProvider;
 import org.joda.time.Duration;
 
 /**
@@ -44,6 +46,24 @@ public interface SinkOptions extends PipelineOptions {
 
   void setOutputType(OutputType value);
 
+  @Description("Method of writing to BigQuery")
+  @Default.Enum("file_loads")
+  BigQueryWriteMethod getBqWriteMethod();
+
+  void setBqWriteMethod(BigQueryWriteMethod value);
+
+  @Description("How often to load a batch of files to BigQuery when writing via file_loads")
+  @Default.String("5m")
+  String getBqTriggeringFrequency();
+
+  void setBqTriggeringFrequency(String value);
+
+  @Description("Number of file shards to stage for BigQuery when writing via file_loads")
+  @Default.Integer(100)
+  int getBqNumFileShards();
+
+  void setBqNumFileShards(int value);
+
   @Description("File format for --outputType=file|stdout; must be one of"
       + " json (each line contains payload[String] and attributeMap[String,String]) or"
       + " text (each line is payload)")
@@ -52,13 +72,17 @@ public interface SinkOptions extends PipelineOptions {
 
   void setOutputFileFormat(OutputFileFormat value);
 
-  @Description("Number of output shards for --outputType=file; defaults to 0 (automatic)"
-      + " for batch running, but must be set to an explicit value for stream processing"
-      + " (--inputType=pubsub)")
-  @Default.Integer(0)
-  Integer getOutputNumShards();
+  @Description("Compression format for --outputType=file")
+  @Default.Enum("GZIP")
+  Compression getOutputFileCompression();
 
-  void setOutputNumShards(Integer value);
+  void setOutputFileCompression(Compression value);
+
+  @Description("Number of output shards for --outputType=file; only relevant for stream"
+      + " processing (--inputType=pubsub); in batch mode, the runner determines sharding")
+  ValueProvider<Integer> getOutputNumShards();
+
+  void setOutputNumShards(ValueProvider<Integer> value);
 
   @Description("Type of --errorOutput; must be one of [pubsub, file]")
   @Default.Enum("pubsub")
@@ -66,13 +90,17 @@ public interface SinkOptions extends PipelineOptions {
 
   void setErrorOutputType(ErrorOutputType value);
 
-  @Description("Number of output shards for --errorOutputType=file; defaults to 0 (automatic)"
-      + " for batch running, but must be set to an explicit value for stream processing"
-      + " (--inputType=pubsub)")
-  @Default.Integer(0)
-  Integer getErrorOutputNumShards();
+  @Description("Compression format for --errorOutputType=file")
+  @Default.Enum("GZIP")
+  Compression getErrorOutputFileCompression();
 
-  void setErrorOutputNumShards(Integer value);
+  void setErrorOutputFileCompression(Compression value);
+
+  @Description("Number of output shards for --errorOutputType=file; only relevant for stream"
+      + " processing (--inputType=pubsub); in batch mode, the runner determines sharding")
+  ValueProvider<Integer> getErrorOutputNumShards();
+
+  void setErrorOutputNumShards(ValueProvider<Integer> value);
 
   @Hidden
   @Description("If true, include a 'stack_trace' attribute in error output messages;"
@@ -114,6 +142,21 @@ public interface SinkOptions extends PipelineOptions {
 
   void setErrorOutput(ValueProvider<String> value);
 
+  @Description("Unless set to false, we will always attempt to decompress gzipped payloads")
+  ValueProvider<Boolean> getDecompressInputPayloads();
+
+  void setDecompressInputPayloads(ValueProvider<Boolean> value);
+
+  @Description("Compression format for payloads when --outputType=pubsub; defaults to GZIP")
+  ValueProvider<Compression> getOutputPubsubCompression();
+
+  void setOutputPubsubCompression(ValueProvider<Compression> value);
+
+  @Description("Compression format for payloads when --errorOutputType=pubsub; defaults to GZIP")
+  ValueProvider<Compression> getErrorOutputPubsubCompression();
+
+  void setErrorOutputPubsubCompression(ValueProvider<Compression> value);
+
   /*
    * Subinterface and static methods.
    */
@@ -133,6 +176,12 @@ public interface SinkOptions extends PipelineOptions {
     Duration getParsedWindowDuration();
 
     void setParsedWindowDuration(Duration value);
+
+    @JsonIgnore
+    Duration getParsedBqTriggeringFrequency();
+
+    void setParsedBqTriggeringFrequency(Duration value);
+
   }
 
   /**
@@ -151,31 +200,35 @@ public interface SinkOptions extends PipelineOptions {
   static void enrichSinkOptions(Parsed options) {
     validateSinkOptions(options);
     options.setParsedWindowDuration(Time.parseDuration(options.getWindowDuration()));
+    options.setParsedBqTriggeringFrequency(Time.parseDuration(options.getBqTriggeringFrequency()));
+    options.setDecompressInputPayloads(
+        providerWithDefault(options.getDecompressInputPayloads(), true));
+    options.setOutputPubsubCompression(
+        providerWithDefault(options.getOutputPubsubCompression(), Compression.GZIP));
+    options.setErrorOutputPubsubCompression(
+        providerWithDefault(options.getErrorOutputPubsubCompression(), Compression.GZIP));
+    options.setOutputNumShards(providerWithDefault(options.getOutputNumShards(), 100));
+    options.setErrorOutputNumShards(providerWithDefault(options.getErrorOutputNumShards(), 100));
   }
 
   /** Detect invalid combinations of parameters and fail fast with helpful error messages. */
   static void validateSinkOptions(SinkOptions options) {
     List<String> errorMessages = new ArrayList<>();
-    if (options.getInputType() == InputType.pubsub && options.getOutputType() == OutputType.file
-        && options.getOutputNumShards() == 0) {
-      errorMessages.add("Missing required parameter: "
+    if (options.getOutputType() == OutputType.bigquery
+        && options.getBqWriteMethod() == BigQueryWriteMethod.file_loads
+        && options.getInputType() == InputType.pubsub && options.getBqNumFileShards() == 0) {
+      errorMessages.add("Missing required parameter:"
           + " --outputNumShards must be set to an explicit non-zero value when"
-          + " --outputType=file and the input is unbounded (--inputType=pubsub);"
-          + " Dataflow recommends starting with twice the value of --maxWorkers or 10"
-          + " (see https://github.com/apache/beam/pull/1952)");
-    }
-    if (options.getInputType() == InputType.pubsub
-        && options.getErrorOutputType() == ErrorOutputType.file
-        && options.getErrorOutputNumShards() == 0) {
-      errorMessages.add("Missing required parameter: "
-          + " --errorOutputNumShards must be set to an explicit non-zero value when"
-          + " --errorOutputType=file and the input is unbounded (--inputType=pubsub);"
-          + " Dataflow recommends starting with twice the value of --maxWorkers or 10"
-          + " (see https://github.com/apache/beam/pull/1952)");
+          + " --outputType=bigquery and --bqWriteMethod=file_loads and the input is unbounded"
+          + " (--inputType=pubsub)");
     }
     if (!errorMessages.isEmpty()) {
       throw new IllegalArgumentException(
           "Configuration errors found!\n* " + String.join("\n* ", errorMessages));
     }
+  }
+
+  static <T> ValueProvider<T> providerWithDefault(ValueProvider<T> inner, T defaultValue) {
+    return NestedValueProvider.of(inner, value -> value == null ? defaultValue : value);
   }
 }

@@ -2,10 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-package com.mozilla.telemetry.decoder;
+package com.mozilla.telemetry.transforms;
 
 import com.mozilla.telemetry.options.InputFileFormat;
 import com.mozilla.telemetry.options.OutputFileFormat;
+import com.mozilla.telemetry.transforms.DecompressPayload;
 import java.util.Arrays;
 import java.util.List;
 import org.apache.beam.sdk.testing.PAssert;
@@ -15,7 +16,7 @@ import org.apache.beam.sdk.values.PCollection;
 import org.junit.Rule;
 import org.junit.Test;
 
-public class GzipDecompressTest {
+public class DecompressPayloadTest {
 
   @Rule
   public final transient TestPipeline pipeline = TestPipeline.create();
@@ -32,10 +33,11 @@ public class GzipDecompressTest {
         "{\"attributeMap\":{\"host\":\"test\"},\"payload\":\"dGVzdA==\"}",
         "{\"attributeMap\":null,\"payload\":\"dGVzdA==\"}");
 
-    final PCollection<String> output = pipeline.apply(Create.of(input))
-        .apply("decodeJson", InputFileFormat.json.decode()).output()
-        .apply("gzipDecompress", new GzipDecompress())
-        .apply("encodeJson", OutputFileFormat.json.encode());
+    final PCollection<String> output = pipeline //
+        .apply(Create.of(input)) //
+        .apply(InputFileFormat.json.decode()).output() //
+        .apply(DecompressPayload.enabled(pipeline.newProvider(true))) //
+        .apply(OutputFileFormat.json.encode());
 
     PAssert.that(output).containsInAnyOrder(expected);
 

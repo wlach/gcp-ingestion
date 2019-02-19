@@ -28,6 +28,9 @@ public class PubsubConstraints {
   public static final int MAX_ATTRIBUTES_PER_MESSAGE = 100;
   public static final int MAX_ATTRIBUTE_KEY_BYTES = 256;
   public static final int MAX_ATTRIBUTE_VALUE_BYTES = 1024;
+  // base64 encoding leads to 4 bytes for every 3 of input, so we might get an error for
+  // messages any larger than 7 MB. To allow room for attributes, we set the limit at 6 MB.
+  public static final int MAX_ENCODABLE_MESSAGE_BYTES = 6 * 1024 * 1024;
 
   public static final String ELLIPSIS = "...";
 
@@ -37,6 +40,19 @@ public class PubsubConstraints {
 
   public static String truncateAttributeValue(String value) {
     return truncateToFitUtf8ByteLength(value, MAX_ATTRIBUTE_VALUE_BYTES);
+  }
+
+  /** Fills out empty payload and attributes if the message itself or components are null. */
+  public static PubsubMessage ensureNonNull(PubsubMessage message) {
+    if (message == null) {
+      return new PubsubMessage(new byte[] {}, new HashMap<>());
+    } else if (message.getPayload() == null) {
+      return ensureNonNull(new PubsubMessage(new byte[] {}, message.getAttributeMap()));
+    } else if (message.getAttributeMap() == null) {
+      return ensureNonNull(new PubsubMessage(message.getPayload(), new HashMap<>()));
+    } else {
+      return message;
+    }
   }
 
   /**
@@ -59,8 +75,8 @@ public class PubsubConstraints {
 
     private static class Fn extends DoFn<PubsubMessage, PubsubMessage> {
 
-      private final Counter countTruncatedKey = Metrics.counter(Fn.class, "truncated-key");
-      private final Counter countTruncatedValue = Metrics.counter(Fn.class, "truncated-value");
+      private final Counter countTruncatedKey = Metrics.counter(Fn.class, "truncated_key");
+      private final Counter countTruncatedValue = Metrics.counter(Fn.class, "truncated_value");
 
       @ProcessElement
       public void processElement(@Element PubsubMessage message,
