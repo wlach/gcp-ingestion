@@ -37,12 +37,12 @@ SINK_OPTS="--workerMachineType=${SINK_WORKER_MACHINE_TYPE} \
 INPUT_OPTS="--inputFileFormat=json \
 --inputType=pubsub"
 
-if [[ $JOB_TYPE == "bqsink" ]]; then
+if [[ $JOB_TYPE == "bq-sink" ]]; then
   JOB_CLASS="com.mozilla.telemetry.Sink"
   OUTPUT_OPTS="--outputType=bigquery ${SINK_OPTS}"
   ERROR_OUTPUT_OPTS="--errorOutputType=file \
 --errorOutputNumShards=${ERROR_NUM_SHARDS}"
-elif [[ $JOB_TYPE == "gcssink" ]] ; then
+elif [[ $JOB_TYPE == "gcs-sink" ]] ; then
   JOB_CLASS="com.mozilla.telemetry.Sink"
   OUTPUT_OPTS="--outputType=file \
 --outputFileFormat=json \
@@ -54,6 +54,12 @@ elif [[ $JOB_TYPE == "decoder" ]] ; then
   OUTPUT_OPTS="--outputType=pubsub \
 --outputFileFormat=json"
   ERROR_OUTPUT_OPTS="--errorOutputType=pubsub"
+elif [[ $JOB_TYPE == "republisher" ]] ; then
+  JOB_CLASS="com.mozilla.telemetry.Republisher"
+  OUTPUT_OPTS="--outputType=pubsub \
+--outputFileFormat=json"
+  ERROR_OUTPUT_OPTS="--errorOutputType=file \
+--errorOutputNumShards=${ERROR_NUM_SHARDS}"
 else
   echo "unknown job type ${JOB_TYPE}"
   exit 1
