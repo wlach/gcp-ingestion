@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+. "$(dirname "$0")"/include/common.sh
+
+# only run lint tests (--override-ini=python_functions=)
+# run linters ("${LINT_ARGS[@]}")
+exec "$(dirname "$0")"/pytest --override-ini=python_functions= --override-ini=testpaths= "${LINT_ARGS[@]}" "$@"

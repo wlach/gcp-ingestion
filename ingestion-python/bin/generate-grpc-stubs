@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+. "$(dirname "$0")"/include/common.sh
+
+# download and build grpclib stubs for pubsub
+function get_googleapis {
+    mkdir -p "$(dirname "$1")"
+    curl -sL https://github.com/googleapis/googleapis/raw/master/"$1" > "$1"
+    for dep in $(sed -nE '/google\/protobuf/!s|import "(google/.*\.proto)";|\1|p' "$1"); do
+        get_googleapis "$dep"
+    done
+}
+
+"$PYTHON" -m pip install grpcio-tools grpclib
+
+for api in google/pubsub/v1/pubsub.proto; do
+    get_googleapis "$api"
+    "$PYTHON" -m grpc_tools.protoc -I. --python_out=. --python_grpc_out=. "$api"
+done

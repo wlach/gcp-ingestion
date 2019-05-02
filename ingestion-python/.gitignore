@@ -1,0 +1,10 @@
+*.pyc
+*.swo
+*.swp
+.coverage
+.idea/
+.mypy_cache
+.pytest_cache
+coverage.xml
+queue
+venv/

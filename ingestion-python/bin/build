@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+. "$(dirname "$0")"/include/common.sh
+
+if ${VENV:-true}; then "${PYTHON##*/}" -m venv "$VENV_DIR"; fi
+
+"$PYTHON" -m pip install --upgrade --no-cache-dir -r requirements.txt
+
+# remove after first release of https://github.com/relud/python-aio-pubsub
+"$PYTHON" -m pip install --no-deps --no-index git+git://github.com/relud/python-aio-pubsub@master#egg=aio-pubsub
