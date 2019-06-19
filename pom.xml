@@ -11,11 +11,48 @@
 
     <modules>
         <module>ingestion-beam</module>
+        <module>ingestion-sink</module>
     </modules>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Keep these dependency versions in sync with those pulled in by beam;
+             check https://mvnrepository.com/artifact/org.apache.beam -->
+        <beam.version>2.13.0</beam.version>
+        <google-cloud.version>1.49.0</google-cloud.version>
+        <jackson.version>2.9.9</jackson.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-json-org</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.everit-org.json-schema</groupId>
+            <artifactId>org.everit.json.schema</artifactId>
+            <version>1.9.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-pubsub</artifactId>
+            <version>${google-cloud.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-storage</artifactId>
+            <version>${google-cloud.version}</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>
@@ -24,11 +61,12 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.8.1</version>
                 <configuration>
-                    <source>1.11</source>
-                    <target>1.11</target>
+                    <source>1.8</source>
+                    <target>1.8</target>
+                    <showWarnings>true</showWarnings>
                     <compilerArgument>-Xlint:all</compilerArgument>
                     <compilerArgument>-Xdoclint:all</compilerArgument>
-                    <compilerArgument>-Werror</compilerArgument>
+                    <!--<compilerArgument>-Werror</compilerArgument>-->
                 </configuration>
             </plugin>
             <plugin>
