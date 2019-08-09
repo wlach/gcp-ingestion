@@ -1,9 +1,0 @@
-*.pyc
-*.swo
-*.swp
-.coverage
-.mypy_cache
-.pytest_cache
-coverage.xml
-queue
-venv/

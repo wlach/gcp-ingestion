@@ -1,9 +1,0 @@
-lib_managed/
-metastore_db/
-derby.log
-tmp/
-GeoLite2-City.mmdb
-cities15000.txt
-schemas.tar.gz
-avro-schema.tar.gz
-bq-schemas/
